@@ -28,7 +28,20 @@ require("http")
     console.log("🌐 Render active");
   });
 
-const TOKEN = process.env.TOKEN;
+/* ===================== حماية من الكراش ===================== */
+process.on("unhandledRejection", (err) => {
+  console.log("❌ unhandledRejection:", err);
+});
+
+process.on("uncaughtException", (err) => {
+  console.log("❌ uncaughtException:", err);
+});
+
+/* ===================== TOKEN CHECK ===================== */
+if (!process.env.TOKEN) {
+  console.log("❌ TOKEN missing in Render env");
+  process.exit(1);
+}
 
 const client = new Client({
   intents: [
@@ -59,7 +72,7 @@ function get(vcId) {
   return music.get(vcId);
 }
 
-// 🔥 play-dl stream
+// 🔥 play-dl stream (أكثر استقرار)
 async function stream(url) {
   const s = await playdl.stream(url);
   return s.stream;
@@ -73,7 +86,7 @@ async function play(vcId) {
   try {
     audio = await stream(d.queue[0]);
   } catch (e) {
-    console.log("stream error");
+    console.log("⚠️ stream error retry");
     d.queue.shift();
     return play(vcId);
   }
@@ -88,9 +101,8 @@ async function play(vcId) {
     new ButtonBuilder().setCustomId(`stop_${vcId}`).setLabel("⏹").setStyle(ButtonStyle.Danger)
   );
 
-  d.text?.send({ content: "🎧 تشغيل", components: [row] }).then(m =>
-    setTimeout(() => m.delete().catch(() => {}), 8000)
-  );
+  d.text?.send({ content: "🎧 تشغيل أغنية", components: [row] })
+    .then(m => setTimeout(() => m.delete().catch(() => {}), 7000));
 
   d.player.removeAllListeners();
 
@@ -99,7 +111,8 @@ async function play(vcId) {
     play(vcId);
   });
 
-  d.player.on("error", () => {
+  d.player.on("error", (err) => {
+    console.log("player error:", err);
     d.queue.shift();
     play(vcId);
   });
@@ -152,14 +165,15 @@ async function sendPanel(ch) {
 client.once(Events.ClientReady, () => {
   console.log(`✅ Logged in ${client.user.tag}`);
 
-  setInterval(() => console.log("💓 alive"), 300000);
+  setInterval(() => {
+    console.log("💓 alive");
+  }, 300000);
 });
 
 // ================= MESSAGE =================
 client.on("messageCreate", async (msg) => {
   if (msg.author.bot) return;
 
-  // setpanel
   if (msg.content === "!setpanel") {
     const members = await msg.guild.members.fetch();
     cache = members.filter(m => !m.user.bot).map(m => m);
@@ -174,18 +188,17 @@ client.on("messageCreate", async (msg) => {
       ]
     });
 
-    return msg.reply({ content: "✅ تم الربط", ephemeral: true });
+    return msg.reply({ content: "✅ تم الربط" });
   }
 
-  // play
   if (msg.content.startsWith("!play")) {
     const q = msg.content.slice(6);
     const vc = msg.member.voice.channel;
 
-    if (!vc) return msg.reply({ content: "ادخل روم صوتي", ephemeral: true });
+    if (!vc) return msg.reply("ادخل روم صوتي");
 
     const url = await search(q);
-    if (!url) return msg.reply({ content: "ما لقيت شيء", ephemeral: true });
+    if (!url) return msg.reply("ما لقيت شيء");
 
     const d = get(vc.id);
 
@@ -201,7 +214,7 @@ client.on("messageCreate", async (msg) => {
 
     if (d.queue.length === 1) play(vc.id);
 
-    msg.reply({ content: "🎶 تم الإضافة", ephemeral: true });
+    msg.reply("🎶 تم التشغيل");
   }
 });
 
@@ -250,11 +263,11 @@ client.on(Events.InteractionCreate, async (i) => {
     const bot = i.guild.members.me;
 
     if (m.roles.highest.position >= bot.roles.highest.position) {
-      return i.reply({ content: "❌", ephemeral: true });
+      return i.reply({ content: "❌ ما أقدر أغيره", ephemeral: true });
     }
 
     await m.setNickname(name);
-    return i.reply({ content: "تم", ephemeral: true });
+    return i.reply({ content: "تم التغيير", ephemeral: true });
   }
 });
 
@@ -275,4 +288,4 @@ client.on("voiceStateUpdate", (oldState) => {
   }
 });
 
-client.login(TOKEN);
+client.login(process.env.TOKEN);
