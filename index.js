@@ -16,35 +16,31 @@ const {
   createAudioPlayer,
   createAudioResource,
   AudioPlayerStatus,
-  NoSubscriberBehavior
+  NoSubscriberBehavior,
+  entersState,
+  VoiceConnectionStatus
 } = require("@discordjs/voice");
 
 const ytSearch = require("yt-search");
 const playdl = require("play-dl");
 
-/* ================== KEEP ALIVE ================== */
+/* ===== KEEP ALIVE ===== */
 require("http")
   .createServer((req, res) => res.end("OK"))
   .listen(process.env.PORT || 3000, () => {
     console.log("🌐 Render active");
   });
 
-/* ================== ERROR PROTECTION ================== */
-process.on("unhandledRejection", (err) => {
-  console.log("❌ unhandledRejection:", err);
-});
+/* ===== حماية ===== */
+process.on("unhandledRejection", (err) => console.log("❌", err));
+process.on("uncaughtException", (err) => console.log("❌", err));
 
-process.on("uncaughtException", (err) => {
-  console.log("❌ uncaughtException:", err);
-});
-
-/* ================== TOKEN CHECK ================== */
 if (!process.env.TOKEN) {
   console.log("❌ TOKEN MISSING");
   process.exit(1);
 }
 
-/* ================== CLIENT ================== */
+/* ===== CLIENT ===== */
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -55,11 +51,11 @@ const client = new Client({
   ]
 });
 
-/* ================== STATE ================== */
+/* ===== STATE ===== */
 const music = new Map();
 let cache = [];
 
-/* ================== MUSIC ================== */
+/* ===== MUSIC ===== */
 function get(vcId) {
   if (!music.has(vcId)) {
     music.set(vcId, {
@@ -74,11 +70,13 @@ function get(vcId) {
   return music.get(vcId);
 }
 
+/* ===== STREAM ===== */
 async function stream(url) {
-  const s = await playdl.stream(url);
+  const s = await playdl.stream(url, { quality: 2 });
   return s.stream;
 }
 
+/* ===== PLAY ===== */
 async function play(vcId) {
   const d = music.get(vcId);
   if (!d || !d.queue.length) return;
@@ -92,9 +90,11 @@ async function play(vcId) {
     return play(vcId);
   }
 
-  const res = createAudioResource(audio);
+  const resource = createAudioResource(audio, {
+    inlineVolume: false
+  });
 
-  d.player.play(res);
+  d.player.play(resource);
   d.connection.subscribe(d.player);
 
   const row = new ActionRowBuilder().addComponents(
@@ -113,19 +113,19 @@ async function play(vcId) {
   });
 
   d.player.on("error", (err) => {
-    console.log("player error:", err);
+    console.log("❌ player error", err);
     d.queue.shift();
     play(vcId);
   });
 }
 
-/* ================== SEARCH ================== */
+/* ===== SEARCH ===== */
 async function search(q) {
   const r = await ytSearch(q);
   return r.videos.length ? r.videos[0].url : null;
 }
 
-/* ================== PANEL ================== */
+/* ===== PANEL ===== */
 function page(p) {
   return cache.slice(p * 25, p * 25 + 25);
 }
@@ -162,16 +162,13 @@ async function sendPanel(ch) {
   });
 }
 
-/* ================== READY ================== */
+/* ===== READY ===== */
 client.once(Events.ClientReady, () => {
   console.log(`✅ Logged in ${client.user.tag}`);
-
-  setInterval(() => {
-    console.log("💓 alive");
-  }, 300000);
+  setInterval(() => console.log("💓 alive"), 300000);
 });
 
-/* ================== MESSAGE ================== */
+/* ===== MESSAGE ===== */
 client.on("messageCreate", async (msg) => {
   if (msg.author.bot) return;
 
@@ -194,8 +191,16 @@ client.on("messageCreate", async (msg) => {
     const conn = joinVoiceChannel({
       channelId: vc.id,
       guildId: vc.guild.id,
-      adapterCreator: vc.guild.voiceAdapterCreator
+      adapterCreator: vc.guild.voiceAdapterCreator,
+      selfDeaf: false
     });
+
+    try {
+      await entersState(conn, VoiceConnectionStatus.Ready, 15000);
+    } catch {
+      conn.destroy();
+      return msg.reply("❌ فشل الاتصال الصوتي");
+    }
 
     d.connection = conn;
     d.text = msg.channel;
@@ -207,60 +212,27 @@ client.on("messageCreate", async (msg) => {
   }
 });
 
-/* ================== INTERACTIONS ================== */
+/* ===== BUTTONS ===== */
 client.on(Events.InteractionCreate, async (i) => {
+  if (!i.isButton()) return;
 
-  if (i.isButton()) {
-    const [a, id] = i.customId.split("_");
-    const d = music.get(id);
-    if (!d) return;
+  const [a, id] = i.customId.split("_");
+  const d = music.get(id);
+  if (!d) return;
 
-    if (a === "skip") {
-      d.player.stop();
-      return i.reply({ content: "⏭", ephemeral: true });
-    }
-
-    if (a === "stop") {
-      d.queue = [];
-      d.player.stop();
-      return i.reply({ content: "⏹", ephemeral: true });
-    }
+  if (a === "skip") {
+    d.player.stop();
+    return i.reply({ content: "⏭", ephemeral: true });
   }
 
-  if (i.isStringSelectMenu()) {
-    const id = i.values[0];
-
-    const modal = new ModalBuilder()
-      .setCustomId(`rename_${id}`)
-      .setTitle("تغيير الاسم");
-
-    const input = new TextInputBuilder()
-      .setCustomId("name")
-      .setLabel("الاسم")
-      .setStyle(TextInputStyle.Short);
-
-    modal.addComponents(new ActionRowBuilder().addComponents(input));
-
-    return i.showModal(modal);
-  }
-
-  if (i.isModalSubmit()) {
-    const name = i.fields.getTextInputValue("name");
-    const id = i.customId.split("_")[1];
-
-    const m = await i.guild.members.fetch(id);
-    const bot = i.guild.members.me;
-
-    if (m.roles.highest.position >= bot.roles.highest.position) {
-      return i.reply({ content: "❌ ما أقدر", ephemeral: true });
-    }
-
-    await m.setNickname(name);
-    return i.reply({ content: "تم", ephemeral: true });
+  if (a === "stop") {
+    d.queue = [];
+    d.player.stop();
+    return i.reply({ content: "⏹", ephemeral: true });
   }
 });
 
-/* ================== VOICE CLEAN ================== */
+/* ===== CLEAN ===== */
 client.on("voiceStateUpdate", (oldState) => {
   const vcId = oldState.channelId;
   if (!vcId) return;
