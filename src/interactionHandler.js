@@ -12,38 +12,6 @@ export async function handleInteraction(interaction, client) {
       await searchAndPlay(interaction, interaction.options.getString('query'));
     }
 
-    else if (cmd === 'skip') {
-      const vcId = getVoiceChannelId(interaction.guildId);
-      if (!vcId) return interaction.reply({ content: '❌ مافيه شي يشتغل.', ephemeral: true });
-      if (interaction.member?.voice?.channelId !== vcId)
-        return interaction.reply({ content: '❌ لازم تكون بنفس الروم.', ephemeral: true });
-      skipTrack(interaction.guildId);
-      await interaction.reply({ content: '⏭ تم التخطي!', ephemeral: true });
-    }
-
-    else if (cmd === 'stop') {
-      const vcId = getVoiceChannelId(interaction.guildId);
-      if (!vcId) return interaction.reply({ content: '❌ مافيه شي يشتغل.', ephemeral: true });
-      if (interaction.member?.voice?.channelId !== vcId)
-        return interaction.reply({ content: '❌ لازم تكون بنفس الروم.', ephemeral: true });
-      stopPlayback(interaction.guildId);
-      await interaction.reply({ content: '⏹ تم الإيقاف ومسح القائمة.', ephemeral: true });
-    }
-
-    else if (cmd === 'queue') {
-      const { current, queue } = getQueue(interaction.guildId);
-      if (!current && queue.length === 0)
-        return interaction.reply({ content: '📋 القائمة فارغة.', ephemeral: true });
-
-      const embed = new EmbedBuilder().setTitle('📋 قائمة الأغاني').setColor(0x5865F2);
-      if (current) embed.addFields({ name: '🎵 يشتغل الآن', value: `${current.title} \`${current.duration}\`` });
-      if (queue.length > 0) {
-        const list = queue.slice(0, 10).map((t, i) => `**${i + 1}.** ${t.title} \`${t.duration}\``).join('\n');
-        embed.addFields({ name: `📋 القائمة (${queue.length})`, value: list });
-      }
-      await interaction.reply({ embeds: [embed], ephemeral: true });
-    }
-
     else if (cmd === 'setpanel') {
       if (!interaction.member?.permissions?.has('ManageNicknames'))
         return interaction.reply({ content: '❌ تحتاج صلاحية إدارة الأسماء.', ephemeral: true });
@@ -77,6 +45,7 @@ export async function handleInteraction(interaction, client) {
         return interaction.reply({ content: '❌ لازم تكون بنفس الروم.', ephemeral: true });
       skipTrack(guildId);
       await interaction.reply({ content: '⏭ تم التخطي!', ephemeral: true });
+      setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
     }
 
     else if (customId.startsWith('music_stop_')) {
@@ -87,6 +56,7 @@ export async function handleInteraction(interaction, client) {
         return interaction.reply({ content: '❌ لازم تكون بنفس الروم.', ephemeral: true });
       stopPlayback(guildId);
       await interaction.reply({ content: '⏹ تم الإيقاف.', ephemeral: true });
+      setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
     }
   }
 }
