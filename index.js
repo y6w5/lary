@@ -15,11 +15,12 @@ const {
   joinVoiceChannel,
   createAudioPlayer,
   createAudioResource,
-  AudioPlayerStatus
+  AudioPlayerStatus,
+  NoSubscriberBehavior
 } = require("@discordjs/voice");
 
 const ytSearch = require("yt-search");
-const ytdl = require("ytdl-core");
+const playdl = require("play-dl");
 
 require("http")
   .createServer((req, res) => res.end("OK"))
@@ -40,7 +41,6 @@ const client = new Client({
 });
 
 // ================= STATE =================
-const panels = new Map();
 const music = new Map();
 let cache = [];
 
@@ -49,7 +49,9 @@ function get(vcId) {
   if (!music.has(vcId)) {
     music.set(vcId, {
       queue: [],
-      player: createAudioPlayer(),
+      player: createAudioPlayer({
+        behaviors: { noSubscriber: NoSubscriberBehavior.Pause }
+      }),
       connection: null,
       text: null
     });
@@ -57,12 +59,26 @@ function get(vcId) {
   return music.get(vcId);
 }
 
-function play(vcId) {
+// 🔥 play-dl stream
+async function stream(url) {
+  const s = await playdl.stream(url);
+  return s.stream;
+}
+
+async function play(vcId) {
   const d = music.get(vcId);
   if (!d || !d.queue.length) return;
 
-  const stream = ytdl(d.queue[0], { filter: "audioonly" });
-  const res = createAudioResource(stream);
+  let audio;
+  try {
+    audio = await stream(d.queue[0]);
+  } catch (e) {
+    console.log("stream error");
+    d.queue.shift();
+    return play(vcId);
+  }
+
+  const res = createAudioResource(audio);
 
   d.player.play(res);
   d.connection.subscribe(d.player);
@@ -72,18 +88,27 @@ function play(vcId) {
     new ButtonBuilder().setCustomId(`stop_${vcId}`).setLabel("⏹").setStyle(ButtonStyle.Danger)
   );
 
-  d.text?.send({ content: "🎧 تشغيل", components: [row] });
+  d.text?.send({ content: "🎧 تشغيل", components: [row] }).then(m =>
+    setTimeout(() => m.delete().catch(() => {}), 8000)
+  );
+
+  d.player.removeAllListeners();
 
   d.player.once(AudioPlayerStatus.Idle, () => {
     d.queue.shift();
     play(vcId);
   });
+
+  d.player.on("error", () => {
+    d.queue.shift();
+    play(vcId);
+  });
 }
 
+// ================= SEARCH =================
 async function search(q) {
   const r = await ytSearch(q);
-  if (!r.videos.length) return null;
-  return r.videos[0].url;
+  return r.videos.length ? r.videos[0].url : null;
 }
 
 // ================= PANEL =================
@@ -108,13 +133,13 @@ function nav(p, max) {
   );
 }
 
-async function sendPanel(channel) {
-  const members = await channel.guild.members.fetch();
+async function sendPanel(ch) {
+  const members = await ch.guild.members.fetch();
   cache = members.filter(m => !m.user.bot).map(m => m);
 
   const max = Math.ceil(cache.length / 25) - 1;
 
-  await channel.send({
+  await ch.send({
     content: "📋 لوحة التحكم",
     components: [
       new ActionRowBuilder().addComponents(menu(0)),
@@ -127,19 +152,15 @@ async function sendPanel(channel) {
 client.once(Events.ClientReady, () => {
   console.log(`✅ Logged in ${client.user.tag}`);
 
-  setInterval(() => {
-    console.log("💓 alive");
-  }, 5 * 60 * 1000);
+  setInterval(() => console.log("💓 alive"), 300000);
 });
 
 // ================= MESSAGE =================
 client.on("messageCreate", async (msg) => {
   if (msg.author.bot) return;
 
-  // setpanel (يمسح القديم ويعيد)
+  // setpanel
   if (msg.content === "!setpanel") {
-    panels.set(msg.guild.id, msg.channel);
-
     const members = await msg.guild.members.fetch();
     cache = members.filter(m => !m.user.bot).map(m => m);
 
@@ -153,20 +174,20 @@ client.on("messageCreate", async (msg) => {
       ]
     });
 
-    return msg.reply("✅ تم ربط اللوحة بهذا الروم");
+    return msg.reply({ content: "✅ تم الربط", ephemeral: true });
   }
 
   // play
   if (msg.content.startsWith("!play")) {
-    const q = msg.content.split(" ").slice(1).join(" ");
+    const q = msg.content.slice(6);
     const vc = msg.member.voice.channel;
 
-    if (!vc) return msg.reply("ادخل روم صوتي");
+    if (!vc) return msg.reply({ content: "ادخل روم صوتي", ephemeral: true });
 
     const url = await search(q);
-    if (!url) return msg.reply("ما لقيت شيء");
+    if (!url) return msg.reply({ content: "ما لقيت شيء", ephemeral: true });
 
-    const data = get(vc.id);
+    const d = get(vc.id);
 
     const conn = joinVoiceChannel({
       channelId: vc.id,
@@ -174,13 +195,13 @@ client.on("messageCreate", async (msg) => {
       adapterCreator: vc.guild.voiceAdapterCreator
     });
 
-    data.connection = conn;
-    data.text = msg.channel;
-    data.queue.push(url);
+    d.connection = conn;
+    d.text = msg.channel;
+    d.queue.push(url);
 
-    if (data.queue.length === 1) play(vc.id);
+    if (d.queue.length === 1) play(vc.id);
 
-    msg.reply("🎶 تم التشغيل");
+    msg.reply({ content: "🎶 تم الإضافة", ephemeral: true });
   }
 });
 
@@ -194,13 +215,13 @@ client.on(Events.InteractionCreate, async (i) => {
 
     if (a === "skip") {
       d.player.stop();
-      return i.reply({ content: "skip", ephemeral: true });
+      return i.reply({ content: "⏭", ephemeral: true });
     }
 
     if (a === "stop") {
       d.queue = [];
       d.player.stop();
-      return i.reply({ content: "stop", ephemeral: true });
+      return i.reply({ content: "⏹", ephemeral: true });
     }
   }
 
@@ -237,19 +258,19 @@ client.on(Events.InteractionCreate, async (i) => {
   }
 });
 
-// ================= SAFETY =================
+// ================= CLEAN VOICE =================
 client.on("voiceStateUpdate", (oldState) => {
   const vcId = oldState.channelId;
   if (!vcId) return;
 
-  const data = music.get(vcId);
-  if (!data) return;
+  const d = music.get(vcId);
+  if (!d) return;
 
   const members = oldState.channel?.members.filter(m => !m.user.bot).size;
 
   if (oldState.id === client.user.id || members === 0) {
-    data.queue = [];
-    data.player.stop();
+    d.queue = [];
+    d.player.stop();
     music.delete(vcId);
   }
 });
