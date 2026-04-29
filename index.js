@@ -8,7 +8,10 @@ const {
   TextInputStyle,
   Events,
   ButtonBuilder,
-  ButtonStyle
+  ButtonStyle,
+  REST,
+  Routes,
+  SlashCommandBuilder
 } = require("discord.js");
 
 const {
@@ -16,49 +19,61 @@ const {
   createAudioPlayer,
   createAudioResource,
   AudioPlayerStatus,
-  NoSubscriberBehavior,
   entersState,
-  VoiceConnectionStatus
+  VoiceConnectionStatus,
+  NoSubscriberBehavior
 } = require("@discordjs/voice");
 
-const ytSearch = require("yt-search");
 const playdl = require("play-dl");
 
-/* ===== KEEP ALIVE ===== */
+/* ====== BASIC ====== */
 require("http")
   .createServer((req, res) => res.end("OK"))
-  .listen(process.env.PORT || 3000, () => {
-    console.log("🌐 Render active");
-  });
+  .listen(process.env.PORT || 3000);
 
-/* ===== حماية ===== */
-process.on("unhandledRejection", (err) => console.log("❌", err));
-process.on("uncaughtException", (err) => console.log("❌", err));
-
-if (!process.env.TOKEN) {
-  console.log("❌ TOKEN MISSING");
+if (!process.env.TOKEN || !process.env.CLIENT_ID) {
+  console.log("❌ حط TOKEN و CLIENT_ID في Render");
   process.exit(1);
 }
 
-/* ===== CLIENT ===== */
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMembers,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildVoiceStates
   ]
 });
 
-/* ===== STATE ===== */
-const music = new Map();
-let cache = [];
+/* ====== COMMANDS ====== */
+const commands = [
+  new SlashCommandBuilder().setName("play").setDescription("تشغيل اغنية").addStringOption(o => o.setName("song").setDescription("اسم او رابط").setRequired(true)),
+  new SlashCommandBuilder().setName("skip").setDescription("تخطي"),
+  new SlashCommandBuilder().setName("stop").setDescription("ايقاف"),
+  new SlashCommandBuilder().setName("setpanel").setDescription("انشاء لوحة الاسماء")
+].map(c => c.toJSON());
 
-/* ===== MUSIC ===== */
-function get(vcId) {
-  if (!music.has(vcId)) {
-    music.set(vcId, {
+/* ====== REGISTER ====== */
+client.once("ready", async () => {
+  console.log(`✅ ${client.user.tag}`);
+
+  const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
+
+  await rest.put(
+    Routes.applicationCommands(process.env.CLIENT_ID),
+    { body: commands }
+  );
+
+  console.log("✅ Slash Commands جاهزة");
+});
+
+/* ====== STATE ====== */
+const music = new Map();
+let membersCache = [];
+
+/* ====== MUSIC ====== */
+function get(id) {
+  if (!music.has(id)) {
+    music.set(id, {
       queue: [],
       player: createAudioPlayer({
         behaviors: { noSubscriber: NoSubscriberBehavior.Pause }
@@ -67,73 +82,40 @@ function get(vcId) {
       text: null
     });
   }
-  return music.get(vcId);
+  return music.get(id);
 }
 
-/* ===== STREAM ===== */
-async function stream(url) {
-  const s = await playdl.stream(url, { quality: 2 });
-  return s.stream;
-}
-
-/* ===== PLAY ===== */
 async function play(vcId) {
   const d = music.get(vcId);
   if (!d || !d.queue.length) return;
 
-  let audio;
-  try {
-    audio = await stream(d.queue[0]);
-  } catch (e) {
-    console.log("⚠️ stream error");
-    d.queue.shift();
-    return play(vcId);
-  }
+  const s = await playdl.stream(d.queue[0]);
+  const res = createAudioResource(s.stream);
 
-  const resource = createAudioResource(audio, {
-    inlineVolume: false
-  });
-
-  d.player.play(resource);
+  d.player.play(res);
   d.connection.subscribe(d.player);
 
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`skip_${vcId}`).setLabel("⏭").setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId(`stop_${vcId}`).setLabel("⏹").setStyle(ButtonStyle.Danger)
+    new ButtonBuilder().setCustomId(`skip_${vcId}`).setLabel("⏭").setStyle(1),
+    new ButtonBuilder().setCustomId(`stop_${vcId}`).setLabel("⏹").setStyle(4)
   );
 
-  d.text?.send({ content: "🎧 تشغيل", components: [row] })
-    .then(m => setTimeout(() => m.delete().catch(() => {}), 7000));
-
-  d.player.removeAllListeners();
+  d.text.send({ content: "🎧 تشغيل", components: [row] });
 
   d.player.once(AudioPlayerStatus.Idle, () => {
     d.queue.shift();
     play(vcId);
   });
-
-  d.player.on("error", (err) => {
-    console.log("❌ player error", err);
-    d.queue.shift();
-    play(vcId);
-  });
 }
 
-/* ===== SEARCH ===== */
-async function search(q) {
-  const r = await ytSearch(q);
-  return r.videos.length ? r.videos[0].url : null;
-}
-
-/* ===== PANEL ===== */
+/* ====== PANEL ====== */
 function page(p) {
-  return cache.slice(p * 25, p * 25 + 25);
+  return membersCache.slice(p * 25, p * 25 + 25);
 }
 
 function menu(p) {
   return new StringSelectMenuBuilder()
-    .setCustomId(`select_${p}`)
-    .setPlaceholder("اختار عضو")
+    .setCustomId(`sel_${p}`)
     .addOptions(page(p).map(m => ({
       label: m.user.username,
       value: m.id
@@ -142,18 +124,18 @@ function menu(p) {
 
 function nav(p, max) {
   return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`prev_${p}`).setLabel("◀").setStyle(2).setDisabled(p === 0),
-    new ButtonBuilder().setCustomId(`next_${p}`).setLabel("▶").setStyle(2).setDisabled(p >= max)
+    new ButtonBuilder().setCustomId(`prev_${p}`).setLabel("◀").setStyle(2),
+    new ButtonBuilder().setCustomId(`next_${p}`).setLabel("▶").setStyle(2)
   );
 }
 
-async function sendPanel(ch) {
-  const members = await ch.guild.members.fetch();
-  cache = members.filter(m => !m.user.bot).map(m => m);
+async function panel(channel) {
+  const members = await channel.guild.members.fetch();
+  membersCache = members.filter(m => !m.user.bot).map(m => m);
 
-  const max = Math.ceil(cache.length / 25) - 1;
+  const max = Math.ceil(membersCache.length / 25) - 1;
 
-  await ch.send({
+  channel.send({
     content: "📋 لوحة التحكم",
     components: [
       new ActionRowBuilder().addComponents(menu(0)),
@@ -162,90 +144,136 @@ async function sendPanel(ch) {
   });
 }
 
-/* ===== READY ===== */
-client.once(Events.ClientReady, () => {
-  console.log(`✅ Logged in ${client.user.tag}`);
-  setInterval(() => console.log("💓 alive"), 300000);
-});
+/* ====== INTERACTIONS ====== */
+client.on(Events.InteractionCreate, async (i) => {
 
-/* ===== MESSAGE ===== */
-client.on("messageCreate", async (msg) => {
-  if (msg.author.bot) return;
+  /* ===== COMMANDS ===== */
+  if (i.isChatInputCommand()) {
 
-  if (msg.content === "!setpanel") {
-    sendPanel(msg.channel);
-    return msg.reply("✅ تم ربط اللوحة");
-  }
-
-  if (msg.content.startsWith("!play")) {
-    const q = msg.content.slice(6);
-    const vc = msg.member.voice.channel;
-
-    if (!vc) return msg.reply("ادخل روم صوتي");
-
-    const url = await search(q);
-    if (!url) return msg.reply("ما لقيت شيء");
-
-    const d = get(vc.id);
-
-    const conn = joinVoiceChannel({
-      channelId: vc.id,
-      guildId: vc.guild.id,
-      adapterCreator: vc.guild.voiceAdapterCreator,
-      selfDeaf: false
-    });
-
-    try {
-      await entersState(conn, VoiceConnectionStatus.Ready, 15000);
-    } catch {
-      conn.destroy();
-      return msg.reply("❌ فشل الاتصال الصوتي");
+    if (i.commandName === "setpanel") {
+      await panel(i.channel);
+      return i.reply({ content: "✅ تم", ephemeral: true });
     }
 
-    d.connection = conn;
-    d.text = msg.channel;
-    d.queue.push(url);
+    if (i.commandName === "play") {
+      const q = i.options.getString("song");
+      const vc = i.member.voice.channel;
 
-    if (d.queue.length === 1) play(vc.id);
+      if (!vc) return i.reply({ content: "❌ ادخل روم صوتي", ephemeral: true });
 
-    msg.reply("🎶 تم التشغيل");
+      const d = get(vc.id);
+
+      const conn = joinVoiceChannel({
+        channelId: vc.id,
+        guildId: vc.guild.id,
+        adapterCreator: vc.guild.voiceAdapterCreator
+      });
+
+      try {
+        await entersState(conn, VoiceConnectionStatus.Ready, 15000);
+      } catch {
+        return i.reply("❌ فشل الاتصال");
+      }
+
+      d.connection = conn;
+      d.text = i.channel;
+      d.queue.push(q);
+
+      if (d.queue.length === 1) play(vc.id);
+
+      return i.reply("🎶 تم");
+    }
+
+    if (i.commandName === "skip") {
+      const vc = i.member.voice.channel;
+      if (!vc) return i.reply("❌");
+
+      const d = music.get(vc.id);
+      if (!d) return i.reply("❌");
+
+      d.player.stop();
+      return i.reply("⏭");
+    }
+
+    if (i.commandName === "stop") {
+      const vc = i.member.voice.channel;
+      if (!vc) return i.reply("❌");
+
+      const d = music.get(vc.id);
+      if (!d) return i.reply("❌");
+
+      d.queue = [];
+      d.player.stop();
+      return i.reply("⏹");
+    }
   }
-});
 
-/* ===== BUTTONS ===== */
-client.on(Events.InteractionCreate, async (i) => {
-  if (!i.isButton()) return;
+  /* ===== BUTTONS ===== */
+  if (i.isButton()) {
+    const [a, id] = i.customId.split("_");
+    const d = music.get(id);
+    if (!d) return;
 
-  const [a, id] = i.customId.split("_");
-  const d = music.get(id);
-  if (!d) return;
+    if (a === "skip") {
+      d.player.stop();
+      return i.reply({ content: "⏭", ephemeral: true });
+    }
 
-  if (a === "skip") {
-    d.player.stop();
-    return i.reply({ content: "⏭", ephemeral: true });
+    if (a === "stop") {
+      d.queue = [];
+      d.player.stop();
+      return i.reply({ content: "⏹", ephemeral: true });
+    }
   }
 
-  if (a === "stop") {
-    d.queue = [];
-    d.player.stop();
-    return i.reply({ content: "⏹", ephemeral: true });
+  /* ===== SELECT ===== */
+  if (i.isStringSelectMenu()) {
+    const id = i.values[0];
+
+    const modal = new ModalBuilder()
+      .setCustomId(`rename_${id}`)
+      .setTitle("تغيير الاسم");
+
+    const input = new TextInputBuilder()
+      .setCustomId("name")
+      .setLabel("الاسم")
+      .setStyle(TextInputStyle.Short);
+
+    modal.addComponents(new ActionRowBuilder().addComponents(input));
+    return i.showModal(modal);
+  }
+
+  /* ===== RENAME ===== */
+  if (i.isModalSubmit()) {
+    const name = i.fields.getTextInputValue("name");
+    const id = i.customId.split("_")[1];
+
+    const m = await i.guild.members.fetch(id);
+    const bot = i.guild.members.me;
+
+    if (m.roles.highest.position >= bot.roles.highest.position) {
+      return i.reply({ content: "❌ رتبة أعلى", ephemeral: true });
+    }
+
+    await m.setNickname(name);
+    return i.reply({ content: "✅ تم", ephemeral: true });
   }
 });
 
 /* ===== CLEAN ===== */
 client.on("voiceStateUpdate", (oldState) => {
-  const vcId = oldState.channelId;
-  if (!vcId) return;
+  const vc = oldState.channel;
+  if (!vc) return;
 
-  const d = music.get(vcId);
+  const d = music.get(vc.id);
   if (!d) return;
 
-  const members = oldState.channel?.members.filter(m => !m.user.bot).size;
+  const users = vc.members.filter(m => !m.user.bot).size;
 
-  if (oldState.id === client.user.id || members === 0) {
+  if (users === 0) {
     d.queue = [];
     d.player.stop();
-    music.delete(vcId);
+    music.delete(vc.id);
   }
 });
 
