@@ -3,6 +3,8 @@ import { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerSt
 import playdl from 'play-dl';
 import express from 'express';
 
+const GUILD_ID = '1205605710319194122';
+
 // ─── Keep Alive ───
 const app = express();
 app.get('/', (req, res) => res.send('✅ Online'));
@@ -114,7 +116,7 @@ client.once('clientReady', async () => {
   console.log(`✅ Bot ready: ${client.user.tag}`);
   try {
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
-    await rest.put(Routes.applicationCommands(client.user.id), {
+    await rest.put(Routes.applicationGuildCommands(client.user.id, GUILD_ID), {
       body: [
         new SlashCommandBuilder().setName('play').setDescription('🎵 ضع رابط يوتيوب أو اسم الأغنية').addStringOption(o => o.setName('query').setDescription('رابط أو اسم').setRequired(true)).toJSON(),
         new SlashCommandBuilder().setName('setpanel').setDescription('📋 إنشاء لوحة تغيير الأسماء').toJSON(),
@@ -143,7 +145,6 @@ client.on('voiceStateUpdate', (oldState, newState) => {
 client.on('interactionCreate', async (interaction) => {
   try {
 
-    // ── Play ──
     if (interaction.isChatInputCommand() && interaction.commandName === 'play') {
       const voiceChannel = interaction.member?.voice?.channel;
       if (!voiceChannel) return interaction.reply({ content: '❌ لازم تكون داخل روم صوتي!', ephemeral: true });
@@ -195,18 +196,16 @@ client.on('interactionCreate', async (interaction) => {
       return interaction.editReply(`🎵 **يشتغل الآن**\n${state.current?.title} \`${state.current?.duration}\``);
     }
 
-    // ── SetPanel ──
     else if (interaction.isChatInputCommand() && interaction.commandName === 'setpanel') {
       if (!interaction.member?.permissions?.has('ManageNicknames'))
         return interaction.reply({ content: '❌ تحتاج صلاحية إدارة الأسماء.', ephemeral: true });
       await interaction.guild.members.fetch();
       const members = [...interaction.guild.members.cache.filter(m => !m.user.bot).sort((a, b) => a.displayName.localeCompare(b.displayName)).values()];
       const totalPages = Math.ceil(members.length / ITEMS_PER_PAGE);
-      const msg = await interaction.reply({ embeds: [buildEmbed(members, 0, totalPages, interaction.guild.name)], components: buildComponents(members, 0, totalPages), fetchReply: true });
+      await interaction.reply({ embeds: [buildEmbed(members, 0, totalPages, interaction.guild.name)], components: buildComponents(members, 0, totalPages), fetchReply: true });
       panelStates.set(interaction.channelId, { page: 0 });
     }
 
-    // ── Select Menu ──
     else if (interaction.isStringSelectMenu() && interaction.customId === 'rename_select') {
       const memberId = interaction.values[0];
       let target;
@@ -221,7 +220,6 @@ client.on('interactionCreate', async (interaction) => {
       await interaction.showModal(modal);
     }
 
-    // ── Modal ──
     else if (interaction.isModalSubmit() && interaction.customId.startsWith('rename_modal_')) {
       const memberId = interaction.customId.replace('rename_modal_', '');
       const newName = interaction.fields.getTextInputValue('new_name').trim();
@@ -238,7 +236,6 @@ client.on('interactionCreate', async (interaction) => {
       }
     }
 
-    // ── Buttons ──
     else if (interaction.isButton()) {
       const { customId } = interaction;
 
