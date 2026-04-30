@@ -100,7 +100,7 @@ async function handlePlay(guildId, voiceChannel, query, replyFn, textChannel, gu
     await entersState(state.connection, VoiceConnectionStatus.Ready, 10_000);
   } catch {
     destroyState(guildId);
-    return replyFn('❌ ما قدرت أدخل الروم. تأكد إن البوت عنده صلاحية Connect و Speak.');
+    return replyFn('❌ ما قدرت أدخل الروم. تأكد من صلاحيات Connect و Speak.');
   }
 
   state.connection.on(VoiceConnectionStatus.Disconnected, async () => {
@@ -197,6 +197,7 @@ client.on('messageCreate', async (message) => {
     if (!voiceChannel) return message.reply('❌ لازم تكون داخل روم صوتي!');
     const query = args.join(' ');
     if (!query) return message.reply('❌ اكتب اسم أو رابط الأغنية.');
+    await message.channel.sendTyping();
     await handlePlay(message.guild.id, voiceChannel, query, (txt) => message.reply(txt), message.channel, message.guild);
   }
 
