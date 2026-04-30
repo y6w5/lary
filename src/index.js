@@ -1,6 +1,7 @@
 import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } from 'discord.js';
 import { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, VoiceConnectionStatus, entersState } from '@discordjs/voice';
 import playdl from 'play-dl';
+import YouTube from 'youtube-sr';
 import express from 'express';
 
 const GUILD_ID = '1284864163637624874';
@@ -26,6 +27,20 @@ function destroyState(guildId) {
     try { state.connection?.destroy(); } catch {}
     guildStates.delete(guildId);
   }
+}
+
+async function searchTrack(query) {
+  if (query.startsWith('http')) {
+    const info = await playdl.video_info(query);
+    return { title: info.video_details.title, url: query, duration: info.video_details.durationRaw };
+  }
+  const result = await YouTube.searchOne(query);
+  if (!result) return null;
+  return {
+    title: result.title,
+    url: `https://www.youtube.com/watch?v=${result.id}`,
+    duration: result.durationFormatted,
+  };
 }
 
 async function playNext(guildId) {
@@ -66,15 +81,10 @@ async function playNext(guildId) {
 async function handlePlay(guildId, voiceChannel, query, replyFn, textChannel, guild) {
   let trackInfo;
   try {
-    if (!query.startsWith('http')) {
-      const results = await playdl.search(query, { source: { youtube: 'video' }, limit: 1 });
-      if (!results?.length) return replyFn('❌ ما لقيت نتائج.');
-      trackInfo = { title: results[0].title, url: results[0].url, duration: results[0].durationRaw };
-    } else {
-      const info = await playdl.video_info(query);
-      trackInfo = { title: info.video_details.title, url: query, duration: info.video_details.durationRaw };
-    }
-  } catch {
+    trackInfo = await searchTrack(query);
+    if (!trackInfo) return replyFn('❌ ما لقيت نتائج.');
+  } catch (err) {
+    console.error('Search error:', err);
     return replyFn('❌ خطأ في البحث.');
   }
 
@@ -233,7 +243,6 @@ client.on('voiceStateUpdate', (oldState, newState) => {
 // ─── Interactions ───
 client.on('interactionCreate', async (interaction) => {
   try {
-
     if (interaction.isChatInputCommand() && interaction.commandName === 'play') {
       const voiceChannel = interaction.member?.voice?.channel;
       if (!voiceChannel) return interaction.reply({ content: '❌ لازم تكون داخل روم صوتي!', ephemeral: true });
