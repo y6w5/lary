@@ -6,6 +6,8 @@ import express from 'express';
 
 const GUILD_ID = '1284864163637624874';
 
+const COOKIE = `__Secure-BUCKET=CHM; HSID=ARGASObwvjjICCqfr; SSID=AV0JEnGfyEfnZw3I1; APISID=6RqdCKmXOstwVBnC/AJ1a3ne9k0QDawaq8; SAPISID=7P547bHp5ip04r_H/A4YLxT2eCKIuS0wDw; __Secure-1PAPISID=7P547bHp5ip04r_H/A4YLxT2eCKIuS0wDw; __Secure-3PAPISID=7P547bHp5ip04r_H/A4YLxT2eCKIuS0wDw; SID=g.a0008whYR_ZYlPnVEgWrOFyz14UhWdMQENaJRj6j3NA88CKhau2JOH3BIjU-4O6G-BuAZMdmMQACgYKAVoSARYSFQHGX2Mi5shqcmWYyHrWl4BYETJbpBoVAUF8yKpWCaWQ0tsFLmgQkwDadeVo0076; __Secure-1PSID=g.a0008whYR_ZYlPnVEgWrOFyz14UhWdMQENaJRj6j3NA88CKhau2JfBaHVe39aDNal5QH2eXDUgACgYKAa8SARYSFQHGX2MijKVR94zj9C0IF5Q98NF7IhoVAUF8yKrTbv_EjFC8PMJn7D4bP5NU0076; __Secure-3PSID=g.a0008whYR_ZYlPnVEgWrOFyz14UhWdMQENaJRj6j3NA88CKhau2J_vpjWczvlRIczZkqvSBCCwACgYKAdkSARYSFQHGX2MiN8xiQHaTkJ2VL9Zoo0BnhBoVAUF8yKqNsjmXw9o5DDRs8iC81DOx0076; LOGIN_INFO=AFmmF2swRQIgHQka63ggxmJ7_cZ0FTxtip6dlmPa7FcdPElclpKrxKYCIQCD2clik7iwnXn0iwTekvxhr5evhl4QHWECMqLYflWTKw:QUQ3MjNmeExySkFFLUgycFVGelhSdWoxMFlzYUUwS2t1VEdmOFNUVFg4Q0U3WUdVWWQ0QU5tNjdDZGdEQlh3OU9YRUVDT0RDVnhTMERJRXJfSm5COF9oVTJseGp4dW43OTdreHJ4c0JWT2VwcUhRa3VsQmdueE11eXJRX1REQ1MxeExqd09RUjY5ZzJYN3FwWHlocG1UanlJd3BLSnBRRFN3; PREF=tz=Asia.Riyadh&f6=40000000&f7=140&f4=10000&f5=30000; SIDCC=AKEyXzX_pdnPOfiVX9ATNPPG8oaJ_kh2u9YZxQiPVX6eJMhfTQTRYEyzvA4_fnLxH6JgJT3JxAw; __Secure-1PSIDCC=AKEyXzUbSLfv4AKhZeHXTTb0AT2K-zSaRhKrRO4lzOQiYrSWg5XzSC9LeXdikDW28MdZb-uACs8; __Secure-3PSIDCC=AKEyXzWaUlYOKEoR7cvxpvt6KjPZH9KIf7ELcM0SXU06MwyTQBYkxcN9KhbEmqpnSHDbio2PuOg; VISITOR_INFO1_LIVE=ZdyuRrJnz5w`;
+
 // ─── Keep Alive ───
 const app = express();
 app.get('/', (req, res) => res.send('✅ Online'));
@@ -61,7 +63,11 @@ async function playNext(guildId) {
   const track = state.queue.shift();
   state.current = track;
   try {
-    const stream = await playdl.stream(track.url, { quality: 2, discordPlayerCompatibility: true });
+    const stream = await playdl.stream(track.url, {
+      quality: 2,
+      discordPlayerCompatibility: true,
+      cookie: COOKIE,
+    });
     const resource = createAudioResource(stream.stream, { inputType: stream.type });
     state.player.play(resource);
     const row = new ActionRowBuilder().addComponents(
