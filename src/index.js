@@ -1,5 +1,28 @@
-import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } from 'discord.js';
-import { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, VoiceConnectionStatus, entersState } from '@discordjs/voice';
+import {
+  Client,
+  GatewayIntentBits,
+  REST,
+  Routes,
+  SlashCommandBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  EmbedBuilder,
+  StringSelectMenuBuilder,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle
+} from 'discord.js';
+
+import {
+  joinVoiceChannel,
+  createAudioPlayer,
+  createAudioResource,
+  AudioPlayerStatus,
+  VoiceConnectionStatus,
+  entersState
+} from '@discordjs/voice';
+
 import playdl from 'play-dl';
 import express from 'express';
 
@@ -8,34 +31,43 @@ const GUILD_ID = '1205605710319194122';
 // ─── Keep Alive ───
 const app = express();
 app.get('/', (req, res) => res.send('✅ Online'));
-app.get('/health', (req, res) => res.send('ok'));
 app.listen(process.env.PORT || 10000, '0.0.0.0');
 
-// ─── Music State ───
+// ─── STATE ───
 const guildStates = new Map();
+const panelStates = new Map();
 
-function getState(guildId) { return guildStates.get(guildId); }
+function getState(id) {
+  return guildStates.get(id);
+}
 
-function createState(guildId) {
-  const state = { connection: null, player: null, queue: [], current: null, textChannel: null, voiceChannelId: null };
-  guildStates.set(guildId, state);
+function createState(id) {
+  const state = {
+    connection: null,
+    player: null,
+    queue: [],
+    current: null,
+    textChannel: null,
+    voiceChannelId: null
+  };
+  guildStates.set(id, state);
   return state;
 }
 
-function destroyState(guildId) {
-  const state = guildStates.get(guildId);
-  if (state) {
-    try { state.player?.stop(true); } catch {}
-    try { state.connection?.destroy(); } catch {}
-    guildStates.delete(guildId);
-  }
+function destroyState(id) {
+  const s = guildStates.get(id);
+  if (!s) return;
+  try { s.player?.stop(true); } catch {}
+  try { s.connection?.destroy(); } catch {}
+  guildStates.delete(id);
 }
 
+// ─── PLAY SYSTEM ───
 async function playNext(guildId) {
   const state = getState(guildId);
   if (!state) return;
 
-  if (state.queue.length === 0) {
+  if (!state.queue.length) {
     state.current = null;
     return destroyState(guildId);
   }
@@ -50,13 +82,13 @@ async function playNext(guildId) {
     state.player.play(resource);
 
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`skip_${guildId}`).setLabel('⏭ Skip').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(`stop_${guildId}`).setLabel('⏹ Stop').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId(`skip_${guildId}`).setLabel('⏭').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`stop_${guildId}`).setLabel('⏹').setStyle(ButtonStyle.Danger)
     );
 
     state.textChannel?.send({
       content: `🎵 ${track.title}`,
-      components: [row],
+      components: [row]
     });
 
   } catch {
@@ -64,25 +96,24 @@ async function playNext(guildId) {
   }
 }
 
-// ─── Rename Panel ───
-const ITEMS_PER_PAGE = 25;
-const panelStates = new Map();
+// ─── PANEL ───
+const ITEMS = 25;
 
-function buildEmbed(members, page, totalPages, guildName) {
+function buildEmbed(members, page, total, guildName) {
   return new EmbedBuilder()
-    .setTitle('📋 لوحة تغيير الأسماء')
-    .setDescription(`السيرفر: ${guildName}\nعدد الأعضاء: ${members.length}`)
-    .setFooter({ text: `صفحة ${page + 1}/${totalPages}` });
+    .setTitle('📋 لوحة الأسماء')
+    .setDescription(`السيرفر: ${guildName}\nالأعضاء: ${members.length}`)
+    .setFooter({ text: `صفحة ${page + 1}/${total}` });
 }
 
-function buildComponents(members, page, totalPages) {
-  const slice = members.slice(page * ITEMS_PER_PAGE, (page + 1) * ITEMS_PER_PAGE);
+function buildComponents(members, page, total) {
+  const slice = members.slice(page * ITEMS, (page + 1) * ITEMS);
 
   const select = new StringSelectMenuBuilder()
     .setCustomId('rename_select')
     .addOptions(slice.map(m => ({
       label: m.displayName,
-      value: m.id,
+      value: m.id
     })));
 
   const nav = new ActionRowBuilder().addComponents(
@@ -96,7 +127,7 @@ function buildComponents(members, page, totalPages) {
   ];
 }
 
-// ─── Bot ───
+// ─── BOT ───
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -107,44 +138,48 @@ const client = new Client({
   ],
 });
 
+// ─── READY ───
 client.once('clientReady', async () => {
-  console.log(`✅ Bot ready: ${client.user.tag}`);
+  console.log(`✅ ${client.user.tag}`);
 
   const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
 
   await rest.put(Routes.applicationGuildCommands(client.user.id, GUILD_ID), {
     body: [
-      new SlashCommandBuilder().setName('play').setDescription('تشغيل').addStringOption(o => o.setName('query').setDescription('رابط أو اسم').setRequired(true)),
-      new SlashCommandBuilder().setName('setpanel').setDescription('لوحة'),
+      new SlashCommandBuilder()
+        .setName('play')
+        .setDescription('تشغيل')
+        .addStringOption(o => o.setName('query').setRequired(true)),
+
+      new SlashCommandBuilder()
+        .setName('setpanel')
+        .setDescription('لوحة')
     ]
   });
 });
 
-// ─── MESSAGE COMMANDS (اللي طلبته فقط) ───
+// ─── MESSAGE COMMANDS (! + /) ───
 client.on('messageCreate', async (msg) => {
   if (msg.author.bot) return;
 
-  // !play
-  if (msg.content.startsWith('!play')) {
-    const query = msg.content.slice(6).trim();
-    const vc = msg.member.voice.channel;
+  const content = msg.content;
 
+  // ─── !play ───
+  if (content.startsWith('!play')) {
+    const query = content.slice(6).trim();
+    const vc = msg.member.voice.channel;
     if (!vc) return msg.reply('❌ ادخل روم صوتي');
 
-    let track;
+    const r = await playdl.search(query, { limit: 1 });
+    if (!r.length) return msg.reply('❌ ما لقيت');
 
-    try {
-      const r = await playdl.search(query, { limit: 1 });
-      if (!r.length) return msg.reply('❌ ما لقيت');
+    const track = {
+      title: r[0].title,
+      url: r[0].url
+    };
 
-      track = { title: r[0].title, url: r[0].url };
-    } catch {
-      return msg.reply('❌ خطأ');
-    }
-
-    const guildId = msg.guild.id;
-    let state = getState(guildId);
-    if (!state) state = createState(guildId);
+    let state = getState(msg.guild.id);
+    if (!state) state = createState(msg.guild.id);
 
     state.queue.push(track);
     state.textChannel = msg.channel;
@@ -153,9 +188,8 @@ client.on('messageCreate', async (msg) => {
     if (!state.connection) {
       state.connection = joinVoiceChannel({
         channelId: vc.id,
-        guildId,
-        adapterCreator: msg.guild.voiceAdapterCreator,
-        selfDeaf: true
+        guildId: msg.guild.id,
+        adapterCreator: msg.guild.voiceAdapterCreator
       });
 
       await entersState(state.connection, VoiceConnectionStatus.Ready, 10000);
@@ -163,20 +197,20 @@ client.on('messageCreate', async (msg) => {
       state.player = createAudioPlayer();
       state.connection.subscribe(state.player);
 
-      state.player.on(AudioPlayerStatus.Idle, () => playNext(guildId));
+      state.player.on(AudioPlayerStatus.Idle, () => playNext(msg.guild.id));
     }
 
-    if (state.queue.length === 1) playNext(guildId);
+    if (state.queue.length === 1) playNext(msg.guild.id);
 
-    msg.reply('🎶 تم');
+    return msg.reply('🎶 تم التشغيل');
   }
 
-  // !setpanel
-  if (msg.content === '!setpanel') {
+  // ─── !setpanel ───
+  if (content === '!setpanel') {
     await msg.guild.members.fetch();
 
     const members = [...msg.guild.members.cache.filter(m => !m.user.bot).values()];
-    const total = Math.ceil(members.length / ITEMS_PER_PAGE);
+    const total = Math.ceil(members.length / ITEMS);
 
     await msg.channel.send({
       embeds: [buildEmbed(members, 0, total, msg.guild.name)],
@@ -185,59 +219,60 @@ client.on('messageCreate', async (msg) => {
 
     panelStates.set(msg.channel.id, { page: 0 });
 
-    msg.reply('✅ تم');
+    return msg.reply('✅ تم');
   }
 });
 
-// ─── باقي الكود (ما تغير) ───
-client.on('interactionCreate', async (interaction) => {
+// ─── INTERACTIONS ───
+client.on('interactionCreate', async (i) => {
 
-  if (interaction.isButton()) {
-    const [a, id] = interaction.customId.split("_");
+  if (i.isButton()) {
+    const [a, id] = i.customId.split('_');
     const state = getState(id);
     if (!state) return;
 
-    if (a === "skip") {
+    if (a === 'skip') {
       state.player.stop();
-      return interaction.reply({ content: "⏭", ephemeral: true });
+      return i.reply({ content: '⏭', ephemeral: true });
     }
 
-    if (a === "stop") {
+    if (a === 'stop') {
       destroyState(id);
-      return interaction.reply({ content: "⏹", ephemeral: true });
+      return i.reply({ content: '⏹', ephemeral: true });
     }
   }
 
-  if (interaction.isStringSelectMenu()) {
-    const id = interaction.values[0];
+  if (i.isStringSelectMenu()) {
+    const id = i.values[0];
 
     const modal = new ModalBuilder()
       .setCustomId(`rename_${id}`)
-      .setTitle("تغيير الاسم");
+      .setTitle('تغيير الاسم');
 
     modal.addComponents(
       new ActionRowBuilder().addComponents(
         new TextInputBuilder()
-          .setCustomId("name")
-          .setLabel("الاسم")
+          .setCustomId('name')
+          .setLabel('الاسم')
           .setStyle(TextInputStyle.Short)
       )
     );
 
-    return interaction.showModal(modal);
+    return i.showModal(modal);
   }
 
-  if (interaction.isModalSubmit()) {
-    const id = interaction.customId.split("_")[1];
-    const name = interaction.fields.getTextInputValue("name");
+  if (i.isModalSubmit()) {
+    const id = i.customId.split('_')[1];
+    const name = i.fields.getTextInputValue('name');
 
-    const member = await interaction.guild.members.fetch(id);
+    const member = await i.guild.members.fetch(id);
     await member.setNickname(name);
 
-    interaction.reply({ content: "تم", ephemeral: true });
+    i.reply({ content: 'تم', ephemeral: true });
   }
 });
 
+// ─── VOICE CLEAN ───
 client.on('voiceStateUpdate', (oldState) => {
   const state = getState(oldState.guild.id);
   if (!state) return;
