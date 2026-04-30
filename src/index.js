@@ -1,7 +1,7 @@
 import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } from 'discord.js';
 import { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, VoiceConnectionStatus, entersState } from '@discordjs/voice';
 import playdl from 'play-dl';
-import YouTube from 'youtube-sr';
+import { YouTube } from 'youtube-sr';
 import express from 'express';
 
 const GUILD_ID = '1284864163637624874';
@@ -31,10 +31,11 @@ function destroyState(guildId) {
 
 async function searchTrack(query) {
   if (query.startsWith('http')) {
-    const info = await playdl.video_info(query);
-    return { title: info.video_details.title, url: query, duration: info.video_details.durationRaw };
+    const result = await YouTube.getVideo(query);
+    if (!result) return null;
+    return { title: result.title, url: query, duration: result.durationFormatted };
   }
-  const result = await YouTube.searchOne(query);
+  const result = await YouTube.searchOne(query, 'video');
   if (!result) return null;
   return {
     title: result.title,
@@ -60,7 +61,7 @@ async function playNext(guildId) {
   const track = state.queue.shift();
   state.current = track;
   try {
-    const stream = await playdl.stream(track.url, { quality: 2 });
+    const stream = await playdl.stream(track.url, { quality: 2, discordPlayerCompatibility: true });
     const resource = createAudioResource(stream.stream, { inputType: stream.type });
     state.player.play(resource);
     const row = new ActionRowBuilder().addComponents(
